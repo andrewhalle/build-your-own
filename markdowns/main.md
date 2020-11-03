@@ -1,2 +1,2 @@
-[libffi](https://github.com/andrewhalle/byo-libffi)
-[gpg](https://github.com/andrewhalle/byo-gpg)
+[libffi](https://andrewhalle.github.io/build-your-own/libffi)
+[gpg](https://andrewhalle.github.io/build-your-own/gpg)
