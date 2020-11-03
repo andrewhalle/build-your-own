@@ -1,6 +1,9 @@
-# Implementing libffi
+# Build your own: libffi
 
-_(repo for this post can be found on [GitHub](https://github.com/andrewhalle/clone-libffi))_
+By: [Andrew Halle](https://github.com/andrewhalle)
+Repo: [byo-libffi](https://github.com/andrewhalle/byo-libffi)
+
+Part of [build-your-own](https://andrewhalle.github.io/build-your-own)
 
 How does code written in one language (say, Python) call written in a different
 language (say, C). It's clear that this is necessary (e.g. for perforance concerns) but,

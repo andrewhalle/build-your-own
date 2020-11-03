@@ -3,7 +3,7 @@
 By: [Andrew Halle](https://github.com/andrewhalle)
 Repo: [byo-gpg](https://github.com/andrewhalle/byo-gpg)
 
-Part of [build-your-own](https://github.com/andrewhalle/build-your-own)
+Part of [build-your-own](https://andrewhalle.github.io/build-your-own)
 
 ## Background
 
@@ -737,6 +737,103 @@ Old: Signature Packet(tag 2)(307 bytes)
 _Here we see a dumped signature packet, which is the next thing we'll parse...)_
 
 ### Signature Packets
+
+Signature packets contain a signature over some data for some key. In our case, they contain RSA signatures, but other signatures are possible. Some key pieces of data that the signature packet might contain are
+
+ * who generated the signature
+ * when the signature was generated
+ * how the signature was generated (what algorithm)
+
+Looking at the [RFC](https://tools.ietf.org/html/rfc4880#section-5.2), we can glean the following important pieces of information that will be important for our parser
+
+ * signature packets have tag 2
+ * there are versions of signature packet, version 3 and version 4 (in this post, I only parse version 4 packets)
+ * signature packets can have subpackets which hold additional information
+ * the signature itself is the last piece of data in the signature packet, more or more *multiprecision integers* according to what algorithm was used to generated the signature.
+
+A *multiprecision integer (MPI)* is a number format defined in the RFC ([3.2](https://tools.ietf.org/html/rfc4880#section-3.2)) for communicating very large numbers. A MPI is a length followed by a big-endian number. We begin by writing a parser for MPIs.
+
+```rust
+/// Parse a multi-precision integer (MPI) as defined by the RFC in
+/// section 3.2.
+pub fn parse_mpi(input: &[u8]) -> IResult<&[u8], BigUint> {
+    let (input, mut length) = take(2_usize)(input)?;
+    let bits = length.read_u16::<BigEndian>().unwrap();
+    let bytes = (bits + 7) / 8;
+
+    let (input, num) = take(bytes)(input)?;
+    let num = BigUint::from_bytes_be(num);
+
+    Ok((input, num))
+}
+```
+
+`parse_mpi` is a byte-oriented parser that first takes a 2 byte length, then interprets `length` bytes as a big-endian `BigUint` (from the `num` crate).
+
+_(note: it is not lost on me that major parts of my program are formed by the crates nom and num. perhaps I should have called my crate n.m)_
+
+We'll use this parser in the parser for signature packets which we alluded to in the previous section, `parse_signature_packet`. First, we define the `SignaturePacket` struct
+
+```rust
+#[derive(Debug)]
+pub struct SignaturePacket {
+    pub version: u8,
+    pub signature_type: u8,
+    pub public_key_algorithm: u8,
+    pub hash_algorithm: u8,
+    pub hashed_subpacket_data: Vec<u8>,
+    pub unhashed_subpacket_data: Vec<u8>,
+    /// holds the left 16 bits of the signed hash value.
+    pub signed_hash_value_head: u16,
+
+    pub signature: Vec<BigUint>,
+}
+```
+
+_(note: if I were more interested in some of the initial fields like version and signature_type, I might have made these enums like I did with packet_tag. Additionally, I would have parsed `hashed_subpacket_data` and `unhashed_subpacket_data` into subpacket structs)_
+
+The struct has the obvious form straight from the RFC. One interesting thing to note is that signature packets have both hashed and unhashed subpackets. The hashed subpackets are included in the hashing process, and are therefore protected. The unhashed subpackets are not included, and can be modified. The signature is a `Vec<BigUint>` because the RFC specifies that there can be one or more, but for our purposes, there will only ever be one.
+
+We can now write `parse_signature_packet`
+
+```rust
+pub fn parse_signature_packet(input: &[u8]) -> IResult<&[u8], PgpPacket> {
+    let (input, version) = take_single_byte(input)?;
+    let (input, signature_type) = take_single_byte(input)?;
+    let (input, public_key_algorithm) = take_single_byte(input)?;
+    let (input, hash_algorithm) = take_single_byte(input)?;
+
+    let (input, hashed_subpacket_data) = parse_length_tagged_data(input)?;
+    let (input, unhashed_subpacket_data) = parse_length_tagged_data(input)?;
+    let (input, signed_hash_value_head) = parse_u16(input)?;
+
+    let (input, signature) = many1(parse_mpi)(input)?;
+
+    Ok((
+        input,
+        PgpPacket::SignaturePacket(SignaturePacket {
+            version,
+            signature_type,
+            public_key_algorithm,
+            hash_algorithm,
+            hashed_subpacket_data: hashed_subpacket_data.to_owned(),
+            unhashed_subpacket_data: unhashed_subpacket_data.to_owned(),
+            signed_hash_value_head,
+            signature,
+        }),
+    ))
+}
+
+pub fn parse_length_tagged_data(input: &[u8]) -> IResult<&[u8], &[u8]> {
+    let (input, length) = parse_u16(input)?;
+
+    take(length)(input)
+}
+```
+
+This uses the helper `take_single_byte` to parse the `version`, `signature_type`, `public_key_algorithm`, and `hash_algorithm` fields. Then, we use `parse_length_tagged_data` to parse `Vec<u8>` that are preceeded by their length. Finally, we use the nom combinator `many1` (which runs its argument parser at least once until it fails, and puts the results in a `Vec`). We assemble these parts into the signature packet.
+
+That completes the signature packet. We have almost everything we need to actually verify a signature. We now just need to parse public key packets.
 
 ### Public Key packets
 
