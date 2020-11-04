@@ -837,8 +837,229 @@ That completes the signature packet. We have almost everything we need to actual
 
 ### Public Key packets
 
-### Putting it all together (`AsciiArmor::into_pgp_packets`)
+Public Key packets contain the information that comprises the public key for the particular cryptosystem in use. For RSA, this is the tuple of (n,e) where n is a very large integer. Here is a pgpdump of the public key I have been using for this post
+
+```
+$ pgpdump tests/01/public.key
+Old: Public Key Packet(tag 6)(269 bytes)
+        Ver 4 - new
+        Public key creation time - Fri Sep 11 18:02:18 PDT 2020
+        Pub alg - RSA Encrypt or Sign(pub 1)
+        RSA n(2048 bits) - ...
+        RSA e(17 bits) - ...
+Old: User ID Packet(tag 13)(38 bytes)
+        User ID - Build your own PGP Key <test@test.com>
+Old: Signature Packet(tag 2)(340 bytes)
+# snip
+Old: Public Subkey Packet(tag 14)(269 bytes)
+        Ver 4 - new
+        Public key creation time - Fri Sep 11 18:02:18 PDT 2020
+        Pub alg - RSA Encrypt or Sign(pub 1)
+        RSA n(2048 bits) - ...
+        RSA e(17 bits) - ...
+Old: Signature Packet(tag 2)(316 bytes)
+# snip
+```
+
+As we can see from the dump, a public key message is made up of a sequence of packets. The first packet is a Public Key Packet (tag 6). This packet contains the tuple (n,e). The second packet is a User ID Packet (tag 13). This contains information about whose public key this is. The User ID Packet is followed by a signature packet, which signs the key. This is followed by a Public Subkey Packet (tag 14) and another signature packet that signs it. A subkey is identical to a regular public key packet, but it may be used for different purposes. For additional security, GPG will generate a public key that is actually comprised of two keys, one used for signing messages, and one used for encrypting and decrypting messages. Since I am only interested in verifying signatures in this post, I will only parse the public key packet (which is used for the signature on my GPG) and ignore the subkey packet.
+
+In order to parse the public key, we first define the structure we will parse into, `PublicKeyPacket`.
+
+```rust
+#[derive(Debug)]
+pub struct PublicKey {
+    pub n: BigUint,
+    pub e: BigUint,
+}
+
+#[derive(Debug)]
+pub struct PublicKeyPacket {
+    pub n: BigUint,
+    pub e: BigUint,
+}
+```
+
+Here, I define separate structures `PublicKey` and `PublicKeyPacket`. Though they have the same representation, I do so to illustrate that in general they may not, and indeed, if I were parsing all of the Public Key Packet, it would have much more data than we need.
+
+The nom parser `parse_public_key_packet` alluded to previously is then given by
+
+```rust
+pub fn parse_public_key_packet(input: &[u8]) -> IResult<&[u8], PgpPacket> {
+    // skips the unneeded fields
+    //  - version (assumed to be 4)
+    //  - time key was created
+    //  - public-key algorithm (assumed to be RSA)
+    let (input, _) = take(6_usize)(input)?;
+
+    // get the needed fields from the key
+    let (input, n) = parse_mpi(input)?;
+    let (input, e) = parse_mpi(input)?;
+
+    // skip the rest
+    let (empty, _) = take(input.len())(input)?;
+
+    Ok((empty, PgpPacket::PublicKeyPacket(PublicKeyPacket { n, e })))
+}
+```
+
+This parser skips over the first few fields (in a desperate attempt to finish this post), then parses two MPI which form the tuple (n,e). Finally, a `PgpPacket::PublicKeyPacket` is returned.
+
+_(note: the `// skip the rest` line may look odd. at the time this parser is called, `input` will only contain data for one packet, because we previously parsed the length of the packet in `parse_pgp_packet`, so this is really just a safeguard that we consume everything we need to and satisfy the `all_consuming` parser in the parent function. this is the reason why `parse_user_id_packet` and `parse_public_subkey_packet` are trivial to implement as ignoring parsers, they simply take the length of their input.)_
+
+That's it for parsers! I also add a method for getting a `PublicKey` from an ASCII-armored string, as the `PublicKey` is what we'll actually use in the next section.
+
+```rust
+impl PublicKey {
+    pub fn parse(input: &str) -> anyhow::Result<Self> {
+        let (_, parts) = parse_ascii_armor_parts_all_consuming(input)
+            .map_err(|_| anyhow!("could not parse ascii armor parts"))?;
+
+        let ascii_armor = AsciiArmor::from_parts(parts)?;
+        if !ascii_armor.verify() {
+            return Err(anyhow!(
+                "ascii armor failed to verify: checksum did not match"
+            ));
+        }
+
+        let packets = ascii_armor.into_pgp_packets()?;
+
+        // this is a bit hacky, I know my keys will have the key used for signing as
+        // the first packet, but this doesn't have to be the case.
+        let public_key_packet = match &packets[0] {
+            PgpPacket::PublicKeyPacket(p) => p,
+            _ => {
+                return Err(anyhow!(
+                    "first packet from the ascii armor was not a public key packet."
+                ));
+            }
+        };
+
+        Ok(PublicKey {
+            n: public_key_packet.n.clone(),
+            e: public_key_packet.e.clone(),
+        })
+    }
+}
+```
+
+This function parses `AsciiArmor` from a string, converts it to a `Vec<PgpPacket>`, gets the first packet (if it's a `PublicKeyPacket`), and returns a `PublicKey`. We also need to implement `AsciiArmor::into_pgp_packets` at this point, which is not hard.
+
+```rust
+impl AsciiArmor {
+    pub fn into_pgp_packets(&self) -> anyhow::Result<Vec<PgpPacket>> {
+        let (_, packets) =
+            parse_pgp_packets(&self.data).map_err(|_| anyhow!("could not parse pgp packets"))?;
+
+        Ok(packets)
+    }
+}
+```
+
+We now have a `CleartextSignature` waiting to be verified, and a `PublicKey` with which to verify it. Let's do that!
+
+### Putting it all together
+
+Let's write the key method of the whole program, `CleartextSignature::verify`. I'll take this a section at a time, to fully explain each part.
+
+```rust
+impl CleartextSignature {
+    pub fn verify(&self, key: &PublicKey) -> anyhow::Result<bool> {
+        let mut hasher = Sha256::new();
+        // ...
+```
+
+We define the `verify` method as a function on `CleartextSignature`. We instantiate a `Sha256` hasher which we'll use to compute the digest.
+
+```rust
+        // ...
+        // 1. write the msg, canonicalized by replacing newlines with CRLF.
+        let r = Regex::new(r"\r\n")?;
+        let replaced = r.replace_all(self.cleartext.as_str(), "\n");
+        let r = Regex::new(r"\n")?;
+        let replaced = r.replace_all(replaced.as_ref(), "\r\n");
+        hasher.update(replaced.as_ref());
+        // ...
+```
+
+The RFC [specifies](https://tools.ietf.org/html/rfc4880#section-7.1) that the message should be canonicalized by converting LF to CRLF.
+
+```rust
+        // ...
+        // 2. write the initial bytes of the signature packet.
+        hasher.update(&[
+            self.signature.version,
+            self.signature.signature_type,
+            self.signature.public_key_algorithm,
+            self.signature.hash_algorithm,
+        ]);
+
+        let mut buf = Vec::new();
+        let length = self.signature.hashed_subpacket_data.len().try_into()?;
+        buf.write_u16::<BigEndian>(length)?;
+        hasher.update(buf);
+        hasher.update(self.signature.hashed_subpacket_data.clone());
+
+        // 3. finally, write the v4 hash trailer.
+        hasher.update(&[0x04_u8, 0xff]);
+        let mut buf = Vec::new();
+        let mut length = self.signature.hashed_subpacket_data.len().try_into()?;
+        length += 6;
+        buf.write_u32::<BigEndian>(length)?;
+        hasher.update(buf);
+        // ...
+```
+
+The RFC [specifies](https://tools.ietf.org/html/rfc4880#section-5.2.4) that part of the signature packet (up to the end of the hased subpacket data) is included in the hash. Additionally, a trailer of `[0x04 0xff]` is included for v4 packets.
+
+```rust
+        // ...
+        let hash = hasher.finalize();
+        let computed = BigUint::from_bytes_be(&hash);
+
+        let signature = self.signature.signature[0]
+            .modpow(&key.e, &key.n)
+            .to_bytes_be();
+        let (_, decoded) = parse_pkcs1(&signature).map_err(|_| anyhow!("Failed to parse pkcs1"))?;
+
+        Ok(decoded == computed)
+    }
+}
+```
+
+Finally, we compute the signature by finalizing the hash, and getting a `BigUint` from the bytes. We compare this to the signature contained in our signature packet. We compute
+
+$$
+S^e \mod n
+$$
+
+and parse the resulting bytes as a PKCS1 signature (I lied! There's one more parser for us to write. I don't fully understand PKCS1, I only implemented enough to get a good result). `parse_pkcs1` is implemented as
+
+```rust
+pub fn parse_pkcs1(input: &[u8]) -> IResult<&[u8], BigUint> {
+    let header = tuple((
+        tag(&[0x01]),
+        take_while(|b| b == 255),
+        tag(&[0x00]),
+        tag(&[
+            0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02,
+            0x01, 0x05, 0x00, 0x04, 0x20,
+        ]),
+    ));
+
+    let (rest, _) = header(input)?;
+
+    let signature = BigUint::from_bytes_be(rest);
+
+    Ok((b"", signature))
+}
+```
+
+These apparently magic bytes come from the [RFC](https://tools.ietf.org/html/rfc4880#section-13.1.3). PKCS1 is a standard way to encode a signature, and I won't fully dig into it.
+
+With that, we have a functioning tool to verify PGP cleartext signatures! It's a little rough around the edges, and a little locked into the specific setup on my local system, but it works! You can generate a new GPG key, sign a message, verify that message, make a minor change to the message, and check that it no longer verifies!
 
 ## Going forward
 
-## Conclusion
+If I were to continue this project, I would certainly implement encryption and decryption of PGP messages next. In an early commit, you may notice that I implemented some RSA functionality in anticipation of this, but decided the most interesting thing to me was writing parsers for PGP itself. One thing I did not get to present was a beautifully parallel large random prime generator that used `rayon`. Additionally, I would implement more of the PGP spec, which is large and complex.
+
+Overall, I would rate RFC 4880 as a good one to start with if you've never implemented an RFC before. I found it to be more readable that previous attempts of mine to better understand some common protocol which I've taken for granted before. The RFC has a lot of information, but taking it in small chunks as I did really aids with understanding. This was the first project where I made a conscious effort to work on it a little bit at a time, at least 3 days a week, and I feel like I got a lot more done than I normally would on a personal project. Finally, narrowing the scope to just cleartext signatures really focused me as the requirements for success were clear.
