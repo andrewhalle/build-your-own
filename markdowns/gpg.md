@@ -251,7 +251,7 @@ We'll talk about parsing ASCII armor in the next section, but we have enough inf
 
 The cleartext will be in form called "dash-escaped", which is described in the RFC. Dash-escaped text is the same as normal text, but if the line starts with a literal `-`, then it is prefixed by `- ` (dash, followed by a space). We'll know when we're done with parsing the cleartext because the ASCII armor always starts with a line beginning with 5 dashes, which we will recognize as not being dash-escaped.
 
-I'll be using [nom](https://crates.io/crates/nom) to build all the different parsers we'll need. Nom is a _parser combinator_ library. Parser combinators are a technique for writing parsers where simple parsers (say, for recognizing a literal word, or a string of characters which are all `a`) are combined to form more complex parsers.All nom parsers have the signature
+I'll be using [nom](https://crates.io/crates/nom) to build all the different parsers we'll need. Nom is a _parser combinator_ library. Parser combinators are a technique for writing parsers where simple parsers (say, for recognizing a literal word, or a string of characters which are all `a`) are combined to form more complex parsers. All nom parsers have the signature
 
 ```rust
 fn parser<T, U>(input: T) -> IResult<T, U>
@@ -342,7 +342,7 @@ pub fn parse_hash_armor_header(input: &str) -> IResult<&str, &str> {
 }
 ```
 
-the `parse_hash_armor_header` function recognizes an `alphanumeric1` string preceeded by `Hash: `.
+the `parse_hash_armor_header` function recognizes an `alphanumeric1` string preceded by `Hash: `.
 
 ```rust
 /// Parse a set of lines (that may be dash-escaped) into a String. Stops when reaching a line
@@ -1009,7 +1009,7 @@ The RFC [specifies](https://tools.ietf.org/html/rfc4880#section-7.1) that the me
         // ...
 ```
 
-The RFC [specifies](https://tools.ietf.org/html/rfc4880#section-5.2.4) that part of the signature packet (up to the end of the hased subpacket data) is included in the hash. Additionally, a trailer of `[0x04 0xff]` is included for v4 packets.
+The RFC [specifies](https://tools.ietf.org/html/rfc4880#section-5.2.4) that part of the signature packet (up to the end of the hashed subpacket data) is included in the hash. Additionally, a trailer of `[0x04 0xff]` is included for v4 packets.
 
 ```rust
         // ...
@@ -1057,6 +1057,15 @@ pub fn parse_pkcs1(input: &[u8]) -> IResult<&[u8], BigUint> {
 These apparently magic bytes come from the [RFC](https://tools.ietf.org/html/rfc4880#section-13.1.3). PKCS1 is a standard way to encode a signature, and I won't fully dig into it.
 
 With that, we have a functioning tool to verify PGP cleartext signatures! It's a little rough around the edges, and a little locked into the specific setup on my local system, but it works! You can generate a new GPG key, sign a message, verify that message, make a minor change to the message, and check that it no longer verifies!
+
+```
+$ cargo run verify -s tests/01/msg.txt.asc --publicKey tests/01/public.key
+   Compiling pgp-rs v0.1.0 (/Users/andrewhalle/blog/build-your-own/gpg)
+    Finished dev [unoptimized + debuginfo] target(s) in 7.52s
+     Running `target/debug/pgp-rs verify -s tests/01/msg.txt.asc --publicKey tests/01/public.key`
+File read. Checksum is valid.
+Signature is valid.
+```
 
 ## Going forward
 
