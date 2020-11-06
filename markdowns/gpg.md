@@ -2,6 +2,7 @@
 
 By: [Andrew Halle](https://github.com/andrewhalle)
 Repo: [byo-gpg](https://github.com/andrewhalle/byo-gpg)
+Date: 2020-11-07
 
 Part of [build-your-own](https://andrewhalle.github.io/build-your-own)
 
@@ -9,40 +10,40 @@ Part of [build-your-own](https://andrewhalle.github.io/build-your-own)
 
 GPG (stands for Gnu Privacy Guard) is an implementation of PGP (which stands for Pretty Good Privacy), an open standard for encryption specified by [RFC 4880](https://tools.ietf.org/html/rfc4880). In this post, we'll build up a program in Rust that implements one part of the PGP standard, verifying cleartext signatures.
 
-_(As an aside, I think it's hilarious that GPG is an implementation of PGP. The obvious right choice was to call it GPGP. I considered calling my tool PGPG, but ultimately decided on pgp-rs, because I'm boring.)_
+_(note: I think it's hilarious that GPG is an implementation of PGP. The obvious right choice was to call it GPGP. I considered calling my tool PGPG, but ultimately decided on pgp-rs, because I'm boring.)_
 
-PGP supports a number of different cryptography suites, but the default cipher suite, and the one I'm most familiar with, is RSA cryptography.
+PGP supports a number of different cryptography suites, but the default cipher suite, and the one I'm most familiar with, is RSA cryptography. A quick review of [RSA](https://en.wikipedia.org/wiki/RSA_(cryptosystem)) might be warranted (it certainly was for me).
 
 ### RSA
 
-A quick review of [RSA](https://en.wikipedia.org/wiki/RSA_(cryptosystem)) might be warranted (it certainly was for me). RSA is a public-key cryptosystem (one in which parts of the key used for encryption are allowed to be non-secret) which relies on the impracticality of factoring very large (a normal figure is 2048 bits) composite numbers. Put another way, it is easy to find 3 large integers n, d, and e with the property that
+RSA is a public-key cryptosystem (one in which parts of the key used for encryption are allowed to be non-secret) which relies on the impracticality of factoring very large (a normal figure is 2048 bits) composite numbers. Put another way, it is easy to find 3 large integers n, d, and e with the property that
 
 $$
 (m^e)^d \equiv m \mod n
 $$
 
-but it's very difficult, given only e and n, to discover d. In this way, the tuple (e,n) forms the public key, which can be broadcast to the world, and the tuple (e,d,n) forms the private key, which is kept secret. Messages can be encrypted by computing the ciphertext C
+but it's very difficult, given only m, e and n, to discover d. In this way, the tuple (e,n) forms the public key, which can be broadcast to the world, and the tuple (e,d,n) forms the private key, which is kept secret. Messages can be encrypted by computing the ciphertext C
 
 $$
-m^e \mod n
+C \equiv m^e \mod n
 $$
 
 C can then be decrypted by anyone with the corresponding private key by computing
 
 $$
-C^d \mod n
+m \equiv C^d \mod n
 $$
 
 So C forms a secret message that's only readable by the intended recipient. Similarly, the owner of the private key can compute a signature S
 
 $$
-m^d \mod n
+S \equiv m^d \mod n
 $$
 
 which can be verified by anyone with the public key by computing
 
 $$
-S^e \mod n
+m \equiv S^e \mod n
 $$
 
 In this way, the owner of the private key can create something that can be verified to be authentic.
@@ -106,7 +107,7 @@ gNRu6pOkl8hR+vNODuC29gW+bJeA7a4AdcDIHkbcVZ+jWyf6qvTP19jjuNXcGzoA
 -----END PGP SIGNATURE-----
 ```
 
-_(as an aside, use [bat](https://github.com/sharkdp/bat)! it's great)_
+_(note: use [bat](https://github.com/sharkdp/bat)! it's great)_
 
 This is the full signature of the text "hello world" using the keypair I generated for this blog post. We'll also get into the format of this signature later. You now as familiar with GPG as you need to be to go through the rest of this post. So, let's start writing some code!
 
@@ -145,7 +146,7 @@ assert_cmd = "1.0.1"
 ```
 we'll use
 
-  * [clap](https://crates.io/crates/clap) for easily building a CLI _(admittedly this is overkill for a program that does one thing, I originally intended to build out more PGP functionality, before deciding that cleartext signatures alone display all the interesting things I wanted to do)_
+  * [clap](https://crates.io/crates/clap) for easily building a CLI _(admittedly this is overkill for a program that does one thing, I originally intended to build out more PGP functionality, before deciding that cleartext signatures alone exercise all the interesting characteristics I wanted to)_
   * [num](https://crates.io/crates/num) for working with big numbers, and doing modular exponentiation
   * [nom](https://crates.io/crates/nom) for parsing our files, nom is a parser combinator library (I'll explain that a bit more later)
   * [base64](https://crates.io/crates/base64) for decoding base64 data
@@ -155,7 +156,7 @@ we'll use
   * [regex](https://crates.io/crates/regex) for replacing newlines _(squints at everyone using windows)_
   * [assert_cmd](https://crates.io/crates/assert_cmd) for easy integration testing
 
-_(phew)_
+_(note: phew)_
 
 ### CLI
 
@@ -199,7 +200,7 @@ fn verify(matches: &ArgMatches) -> anyhow::Result<()> {
 }
 ```
 
-I personally really like the macro method of specifying the CLI, but there are other methods. This defines an app (and its metadata) as well as a subcommand `verify` that takes two command line arguments, `source` which will be the cleartext signature we're verifying, and `publicKey` which will be the public key we use to verify it. After parsing the command-line arguments, and providing some sensible defaults, we call out to `pgp_rs::verify_cleartext_message` which we define in `lib.rs`
+I personally really like the macro method of specifying the CLI, but there are other methods. This defines an app (and its metadata) as well as a subcommand `verify` that takes two command line arguments, `source` which will be the cleartext signature we're verifying, and `publicKey` which will be the public key we use to verify it. After parsing the command-line arguments, and providing some sensible defaults, we call out to `pgp_rs::verify_cleartext_message` which we define in `lib.rs` (I'll stop including filenames from here on out, find the code in the [repo](https://github.com/andrewhalle/byo-gpg)!)
 
 ```rust
 use anyhow::anyhow;
@@ -229,7 +230,9 @@ pub fn verify_cleartext_message(source: &str, public_key_path: &str) -> anyhow::
 }
 ```
 
-We parse the cleartext signature and the key, and then verify the signature with the key. If the signature fails to verify with the key, we return an error so the program exits with an error code. We also set up some modules that we'll use later.
+_(note: this snippet of code uses types `CleartextSignature` and `PublicKey` which we haven't defined yet. I'm just sketching out the broad structure of this method to get the boring stuff out of the way first.)_
+
+We parse the cleartext signature and the key, and then verify the signature with the key. If the signature fails to verify with the key, we return an error so the program exits with an error code (I'll ignore the modules set up in this snippet for the rest of the write-up).
 
 Now, we can get into the meat of this code, the parsing functions. In order to do *that* however, we have to take a brief detour _INTO THE RFC_. Take this `::<>`, it's dangerous to go alone.
 
@@ -249,7 +252,7 @@ The functionality of PGP that we're implementing is validating _cleartext signat
 
 We'll talk about parsing ASCII armor in the next section, but we have enough information to parse most of this already. In order to recognize a cleartext signature, we need to first look for the header, followed by a `Hash: <alg>` (`alg` in this case will be SHA256, but there are other options), an empty line, the cleartext, then finally the signature.
 
-The cleartext will be in form called "dash-escaped", which is described in the RFC. Dash-escaped text is the same as normal text, but if the line starts with a literal `-`, then it is prefixed by `- ` (dash, followed by a space). We'll know when we're done with parsing the cleartext because the ASCII armor always starts with a line beginning with 5 dashes, which we will recognize as not being dash-escaped.
+The cleartext will be in form called "dash-escaped", which is described in the RFC. Dash-escaped text is the same as normal text, but if the line starts with a literal `-`, then it is prefixed by a dash, followed by a space. We'll know when we're done with parsing the cleartext because the ASCII armor always starts with a line beginning with 5 dashes, which we will recognize as not being dash-escaped.
 
 I'll be using [nom](https://crates.io/crates/nom) to build all the different parsers we'll need. Nom is a _parser combinator_ library. Parser combinators are a technique for writing parsers where simple parsers (say, for recognizing a literal word, or a string of characters which are all `a`) are combined to form more complex parsers. All nom parsers have the signature
 
@@ -302,7 +305,7 @@ fn main() {
 
 This example defines 3 parsers, `parse_red`, `parse_green`, and `parse_blue`, which look for a literal string, and if it's found, return the associated `Color` variant. If the input does not contain the string literal, the parser fails (that's why we can ignore the result of the tag parser, we know what it was, and we can return the built value we wanted). `parse_color` is then built from these basic blocks using the `alt` combinator, which succeeds if one of the parsers passed to it in a tuple succeeds, and it succeeds with that result. The `main` function then parses a single color from the string `"Green123"`, leaving the `123` string remaining.
 
-Now to parse a cleartext signature using nom, we first define a `struct` to parse into (in `pgp/signature.rs`)
+Now to parse a cleartext signature using nom, we first define a `struct` to parse into
 
 ```rust
 #[derive(Debug)]
@@ -342,7 +345,7 @@ pub fn parse_hash_armor_header(input: &str) -> IResult<&str, &str> {
 }
 ```
 
-the `parse_hash_armor_header` function recognizes an `alphanumeric1` string preceded by `Hash: `.
+`alphanumeric1` is a parser included with nom that recognizes at least one alphanumeric character. `preceded` is a parser that takes two parsers as argument, it returns as a success the result of the second parser, if both succeed. `terminated` is a parser that takes two parsers as argument, and returns as success the result of the first parser, if both are successful. So, the `parse_hash_armor_header` function recognizes an `alphanumeric1` string preceded by `Hash: ` and returns it, ignoring any trailing newlines.
 
 ```rust
 /// Parse a set of lines (that may be dash-escaped) into a String. Stops when reaching a line
@@ -354,9 +357,20 @@ pub fn parse_possibly_dash_escaped_chunk(input: &str) -> IResult<&str, String> {
 
     Ok((input, chunk))
 }
+
+/// Runs a parser repeatedly, concatenating the results into a String.
+pub fn fold_into_string<F: Fn(&str) -> IResult<&str, &str>>(
+    input: &str,
+    parser: F,
+) -> IResult<&str, String> {
+    fold_many0(parser, String::new(), |mut s, item| {
+        s.push_str(item);
+        s
+    })(input)
+}
 ```
 
-`parse_possibly_dash_escaped_chunk` uses a helper I wrote `fold_into_string` which takes a parser that parses a single line of text and combines them into one string. We then `pop()` the last character off the string, because we don't need the last newline.
+`parse_possibly_dash_escaped_chunk` uses a helper I wrote `fold_into_string` which takes a parser that parses a single line of text and runs it repeatedly (until it fails), collecting the results into a `String`. We then `pop()` the last character off the string, because we don't need the last newline.
 
 ```rust
 /// Parse a line of text that may be dash-escaped. If a line of text is not dash-escaped, but
@@ -438,7 +452,7 @@ impl CleartextSignature {
 }
 ```
 
-This parses the parts of the cleartext signature using the function we just built, does some extra work with the ASCII armor (which we'll talk about in the next section) and then returns the Cleartext signature or an `Err`. Note that this function, even though it's named `parse` does more work than just parsing. Because of that, I chose to have it return a normal `Result` (actually an `anyhow::Result` for simplicity) rather than a nom `IResult`, because errors that can occur in this function aren't strictly parsing errors. Another error that could occur is the ASCII armor contained doesn't have a valid checksum. That's a nice segue into the next section, parsing and validating ASCII armor.
+Not every line of this is clear yet. We haven't talked about ASCII armor or PGP packets at all yet. Nonetheless, the high-level idea is clear. This parses the parts of the cleartext signature using the function we just built, does some extra work with the ASCII armor (which we'll talk about in the next section) and then returns the Cleartext signature or an `Err`. Note that this function, even though it's named `parse` does more work than just parsing. Because of that, I chose to have it return a normal `Result` (actually an `anyhow::Result` for simplicity) rather than a nom `IResult`, because errors that can occur in this function aren't strictly parsing errors. Another error that could occur is the ASCII armor contained doesn't have a valid checksum. That's a nice segue into the next section, parsing and validating ASCII armor.
 
 ### ASCII Armor
 
@@ -446,7 +460,7 @@ PGP defines a number of data structures for implementations to use. ASCII armor 
 
 Let's start by writing a nom parser for base64 text. I'll use the fact that my PGP implementation writes out base64 chunks in lines of 64 characters (I believe all implementations would do this, but I couldn't find a quick reference for it in the RFC. I don't consider it an important detail).
 
-We start in the same way we started with parsing a chunk of dash-escaped text
+We start in the same way we started previously, when we were parsing a chunk of dash-escaped text
 
 ```rust
 /// Parse a chunk of base64 encoded text.
@@ -599,9 +613,9 @@ There's one more function that we specified in the last section that we would ne
 
 ### PGP Packets
 
-A PGP message consists of a sequence of data structures known as *packets*. Each packet contains one particular piece of information required for the particular PGP function. In our program, we'll only concern ourselves with signature packets and public key packets, but some other types of packets are "User ID Packet" (for communicating information about who a key belongs to) and "Compressed Data Packet" (for actual encrypted data).
+A PGP message consists of a sequence of data structures known as *packets*. Each packet contains a particular piece of information required for the particular PGP function. In our program, we'll only concern ourselves with signature packets and public key packets, but some other types of packets are "User ID Packet" (for communicating information about who a key belongs to) and "Compressed Data Packet" (for actual encrypted data).
 
-All PGP packets begin with the same header, that gives information about what type of packet is contained, and how big it is. There are two types of header, new format and old format. In this post, we only implement parsing old format packets (because that's all GPG seems to produce on my system).
+All PGP packets begin with the same header which gives information about what type of packet is contained and how big it is. There are two types of header, new format and old format. In this post, we only implement parsing old format packets (because that's all GPG seems to produce on my system).
 
 First, we'll make an enum for PGP packets.
 
@@ -617,15 +631,15 @@ pub enum PgpPacket {
 
 ```
 
-I've made `SignaturePacket` and `PublicKeyPacket` hold their data in separate structs with the same name (I'll cover those structs in future sections). I've included variants for `UserIdPacket` and `PublicSubkeyPacket` because my GPG produces this packets, so I want to recognize them and ignore them.
+I've made `SignaturePacket` and `PublicKeyPacket` hold their data in separate structs with the same name (I'll cover those structs in future sections). I've included variants for `UserIdPacket` and `PublicSubkeyPacket` because my GPG produces these packets, so I want to recognize them and ignore them.
 
-Packets are formed from sequences of bytes. Because of this, our nom parsers for packets will have a different form than our parsers have thus far. Whereas we've been using parsers of the form
+Packets are formed from sequences of bytes. Because of this, our nom parsers for packets will have a different form than our parsers have thus far. Up to now, we've been using parsers of the form
 
 ```rust
 fn string_parser<T>(input: &str) -> IResult<&str, T>
 ```
 
-our packet parsers will have the form
+Our packet parsers will have the form
 
 ```rust
 fn bytes_parser<T>(input: &[u8]) -> IResult<&[u8], T>
@@ -643,7 +657,7 @@ pub fn parse_pgp_packets(input: &[u8]) -> IResult<&[u8], Vec<PgpPacket>> {
 }
 ```
 
-This parser repeatedly calls `parse_pgp_packet` (which puts each packet parsed into a `Vec`) and ensures that no input remains. `parse_pgp_packet` is given by
+`all_consuming(many0(/**/))` repeatedly calls `parse_pgp_packet`, puts each packet parsed into a `Vec`, and ensures that no input remains. `parse_pgp_packet` is given by
 
 ```rust
 pub fn parse_pgp_packet(input: &[u8]) -> IResult<&[u8], PgpPacket> {
@@ -747,9 +761,9 @@ Signature packets contain a signature over some data for some key. In our case, 
 Looking at the [RFC](https://tools.ietf.org/html/rfc4880#section-5.2), we can glean the following important pieces of information that will be important for our parser
 
  * signature packets have tag 2
- * there are versions of signature packet, version 3 and version 4 (in this post, I only parse version 4 packets)
+ * there are two versions of signature packet, version 3 and version 4 (in this post, I only parse version 4 packets)
  * signature packets can have subpackets which hold additional information
- * the signature itself is the last piece of data in the signature packet, more or more *multiprecision integers* according to what algorithm was used to generated the signature.
+ * the signature itself is the last piece of data in the signature packet, one or more *multiprecision integers* according to what algorithm was used to generated the signature.
 
 A *multiprecision integer (MPI)* is a number format defined in the RFC ([3.2](https://tools.ietf.org/html/rfc4880#section-3.2)) for communicating very large numbers. A MPI is a length followed by a big-endian number. We begin by writing a parser for MPIs.
 
@@ -772,7 +786,7 @@ pub fn parse_mpi(input: &[u8]) -> IResult<&[u8], BigUint> {
 
 _(note: it is not lost on me that major parts of my program are formed by the crates nom and num. perhaps I should have called my crate n.m)_
 
-We'll use this parser in the parser for signature packets which we alluded to in the previous section, `parse_signature_packet`. First, we define the `SignaturePacket` struct
+We'll use this parser in `parse_signature_packet` which we alluded to in the previous section. First, we define the `SignaturePacket` struct
 
 ```rust
 #[derive(Debug)]
@@ -792,7 +806,7 @@ pub struct SignaturePacket {
 
 _(note: if I were more interested in some of the initial fields like version and signature_type, I might have made these enums like I did with packet_tag. Additionally, I would have parsed `hashed_subpacket_data` and `unhashed_subpacket_data` into subpacket structs)_
 
-The struct has the obvious form straight from the RFC. One interesting thing to note is that signature packets have both hashed and unhashed subpackets. The hashed subpackets are included in the hashing process, and are therefore protected. The unhashed subpackets are not included, and can be modified. The signature is a `Vec<BigUint>` because the RFC specifies that there can be one or more, but for our purposes, there will only ever be one.
+The struct has the obvious form direct from the RFC. One interesting thing to note is that signature packets have both hashed and unhashed subpackets. The hashed subpackets are included in the hashing process, and are therefore protected. The unhashed subpackets are not included, and can be modified. The signature is a `Vec<BigUint>` because the RFC specifies that there can be one or more, but for our purposes, there will only ever be one.
 
 We can now write `parse_signature_packet`
 
@@ -829,11 +843,17 @@ pub fn parse_length_tagged_data(input: &[u8]) -> IResult<&[u8], &[u8]> {
 
     take(length)(input)
 }
+
+pub fn take_single_byte(input: &[u8]) -> IResult<&[u8], u8> {
+    let (input, slice) = take(1_usize)(input)?;
+
+    Ok((input, slice[0]))
+}
 ```
 
 This uses the helper `take_single_byte` to parse the `version`, `signature_type`, `public_key_algorithm`, and `hash_algorithm` fields. Then, we use `parse_length_tagged_data` to parse `Vec<u8>` that are preceeded by their length. Finally, we use the nom combinator `many1` (which runs its argument parser at least once until it fails, and puts the results in a `Vec`). We assemble these parts into the signature packet.
 
-That completes the signature packet. We have almost everything we need to actually verify a signature. We now just need to parse public key packets.
+That completes the signature packet. We have almost everything we need to actually verify a signature. Now, we just need to parse public key packets.
 
 ### Public Key packets
 
@@ -1069,6 +1089,6 @@ Signature is valid.
 
 ## Going forward
 
-If I were to continue this project, I would certainly implement encryption and decryption of PGP messages next. In an early commit, you may notice that I implemented some RSA functionality in anticipation of this, but decided the most interesting thing to me was writing parsers for PGP itself. One thing I did not get to present was a beautifully parallel large random prime generator that used `rayon`. Additionally, I would implement more of the PGP spec, which is large and complex.
+If I were to continue this project, I would certainly implement encryption and decryption of PGP messages next. In an early commit, you may notice that I implemented some RSA functionality in anticipation of this, but decided the most interesting thing to me was writing parsers for PGP itself. One thing I did not get to present was a beautifully parallel large random prime generator that used `rayon`. Additionally, I would implement more of the PGP specification, which is large and complex.
 
 Overall, I would rate RFC 4880 as a good one to start with if you've never implemented an RFC before. I found it to be more readable that previous attempts of mine to better understand some common protocol which I've taken for granted before. The RFC has a lot of information, but taking it in small chunks as I did really aids with understanding. This was the first project where I made a conscious effort to work on it a little bit at a time, at least 3 days a week, and I feel like I got a lot more done than I normally would on a personal project. Finally, narrowing the scope to just cleartext signatures really focused me as the requirements for success were clear.
